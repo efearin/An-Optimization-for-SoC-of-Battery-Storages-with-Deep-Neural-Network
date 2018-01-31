@@ -10,15 +10,21 @@ T = 96 # Number of periods
 n1, n2 = [0.9, 0.9] # Efficiencies of -/- converter and -/~ inverter as Ratio (#)
 Mgl, Mgb, Mpvl, Mpvb, Mbl = [100000, 100000, 100000, 100000, 100000] # Maximum power flow limits for all lines in MegaWatts (MW)
 Msoc = 500000 # Maximum SoC in MegaWattHours (MWh)
-SoC0 = 0 # Starting SoC in MegaWattHours (MWh)
+Isoc # Starting SoC in MegaWattHours (MWh)
+
+# SoC Initialization Functions
+def set_Isoc(init=0):
+    Isoc = init
+def get_Isoc():
+    return Isoc
 
 # Read and Initialize Iterable Parameters
-df=pd.read_csv("actual_pvgeneration.csv", converters={"actual_pvgeneration": float}, nrows=96)
-Ppv_List = df["actual_pvgeneration"].tolist() # Daily PV generation forecast in MegaWatts (MW)
-df=pd.read_csv("actual_load.csv", converters={"actual_load": float}, nrows=96)
-Pl_List = df["actual_load"].tolist() # Daily load forecast in MegaWatts (MW)
-df=pd.read_csv("costs_mwh.csv", converters={"costs_mwh": float})
-C_List = df["costs_mwh"].tolist() # Electriciy prices in TOU Tariff per MegaWattHours in Euros (€)
+df_pv = pd.read_csv("actual_pvgeneration.csv", converters={"actual_pvgeneration": float}, nrows=96)
+Ppv_List = df_pv["actual_pvgeneration"].tolist() # Daily PV generation forecast in MegaWatts (MW)
+df_l = pd.read_csv("actual_load.csv", converters={"actual_load": float}, nrows=96)
+Pl_List = df_l["actual_load"].tolist() # Daily load forecast in MegaWatts (MW)
+df_c = pd.read_csv("costs_mwh.csv", converters={"costs_mwh": float})
+C_List = df_c["costs_mwh"].tolist() # Electriciy prices in TOU Tariff per MegaWattHours in Euros (€)
 
 # LP MODEL
 
@@ -69,9 +75,19 @@ def LP_Minimize_Cost(Ppv, Pl, C, Initial_SoC):
         s = [(round(100*SoC_results[t]/Msoc)) for t in range(T)]
         print("SoC (%):" + " ".join(map(str, s)))
         print("Total_Cost (€) = ", m.objVal)
+        
+        set_Isoc(SoC[0])
     else:
         print("NO FEASIBLE SOLUTION!")    
     
 
-
-LP_Minimize_Cost(Ppv_List, Pl_List, C_List, SoC0)
+# Optimization Loop Function
+def Optimize():
+    LP_Minimize_Cost(Ppv_List, Pl_List, C_List, get_Isoc())
+    Ppv_List.pop(0)
+    df_pv = pd.read_csv("actual_pvgeneration.csv", converters={"actual_pvgeneration": float}, skiprows=96+i, nrows=1)
+    Ppv_List.append(df_pv["actual_pvgeneration"].values())
+    Pl_List.pop(0)
+    df_l = pd.read_csv("actual_pvgeneration.csv", converters={"actual_load": float}, skiprows=96+i, nrows=1)
+    Ppv_List.append(df_l["actual_load"].values())
+    
