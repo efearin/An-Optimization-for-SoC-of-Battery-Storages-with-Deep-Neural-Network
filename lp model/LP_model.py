@@ -39,23 +39,23 @@ def LP_Minimize_Cost(Ppv, Pl, C, Initial_SoC):
 
     # Add Decision Variables
     for t in range(T):
-        Pg[t] = m.addVar(lb=0, vtype=GRB.CONTINUOUS)
-        Pgl[t] = m.addVar(lb=0, ub=Mgl, vtype=GRB.CONTINUOUS)
-        Pgb[t] = m.addVar(lb=0, ub=Mgb, vtype=GRB.CONTINUOUS)
-        Ppvl[t] = m.addVar(lb=0, ub=Mpvl, vtype=GRB.CONTINUOUS)
-        Ppvb[t] = m.addVar(lb=0, ub=Mpvb, vtype=GRB.CONTINUOUS)
-        Pbl[t] = m.addVar(lb=0, ub=Mbl, vtype=GRB.CONTINUOUS)
-        SoC[t] = m.addVar(lb=0, ub=Msoc, vtype=GRB.CONTINUOUS)
+        Pg[t] = m.addVar(lb=0, vtype=GRB.CONTINUOUS) # Grid input power flow variables
+        Pgl[t] = m.addVar(lb=0, ub=Mgl, vtype=GRB.CONTINUOUS) # Grid to Load power flow variables
+        Pgb[t] = m.addVar(lb=0, ub=Mgb, vtype=GRB.CONTINUOUS) # Grid to Battery power flow variables
+        Ppvl[t] = m.addVar(lb=0, ub=Mpvl, vtype=GRB.CONTINUOUS) # PV to Load power flow variables
+        Ppvb[t] = m.addVar(lb=0, ub=Mpvb, vtype=GRB.CONTINUOUS) # PV to Battery power flow variables
+        Pbl[t] = m.addVar(lb=0, ub=Mbl, vtype=GRB.CONTINUOUS) # Battey to Load power flow variables
+        SoC[t] = m.addVar(lb=0, ub=Msoc, vtype=GRB.CONTINUOUS) # Battety stored energy variables
 
     # Add Linear Constraints
     for t in range(T):
-        m.addConstr(Pgl[t] + Pgb[t] == Pg[t])
-        m.addConstr(Ppvl[t] + Ppvb[t] == Ppv[t])
-        m.addConstr(Pgl[t] + n1 * n2 * Ppvl[t] + n2 * Pbl[t] == Pl[t])
+        m.addConstr(Pgl[t] + Pgb[t] == Pg[t]) # KCL constraints for Grid
+        m.addConstr(Ppvl[t] + Ppvb[t] == Ppv[t]) # KCL constraints for PV
+        m.addConstr(Pgl[t] + n1 * n2 * Ppvl[t] + n2 * Pbl[t] == Pl[t]) # KCL constraints for Load
         if t == 0:
-            m.addConstr(Initial_SoC + dT * (n2 * Pgb[t] + n1 * Ppvb[t] - Pbl[t]) == SoC[t])
+            m.addConstr(Initial_SoC + dT * (n2 * Pgb[t] + n1 * Ppvb[t] - Pbl[t]) == SoC[t]) # The first KCL constraint for Battery
         else:
-            m.addConstr(SoC[t-1] + dT * (n2*Pgb[t] + n1*Ppvb[t] - Pbl[t]) == SoC[t])
+            m.addConstr(SoC[t-1] + dT * (n2*Pgb[t] + n1*Ppvb[t] - Pbl[t]) == SoC[t]) # Rest of the KCL constraints for Battery
     
     # Optimize Model
     m.setObjective(sum((dT * Pg[t] * C[t]) for t in range(T)), GRB.MINIMIZE) # Set Objective Function
