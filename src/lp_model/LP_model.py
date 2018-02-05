@@ -12,8 +12,8 @@ T = 96 # Number of periods in a ay
 n1, n2 = [0.9, 0.9] # Efficiencies of -/- converter and -/~ inverter as Ratio (#)
 Mg, Mgl, Mgb, Mpvl, Mpvb, Mbl = [GRB.INFINITY, GRB.INFINITY, GRB.INFINITY,
     GRB.INFINITY, GRB.INFINITY, GRB.INFINITY] # Maximum power flow limits for all lines in MegaWatts (MW)
-Price = pd.read_csv("costs_mwh.csv", converters={"costs_mwh":
-    float})["costs_mwh"].tolist() # Electriciy prices in TOU Tariff per MegaWattHours in Euros (€)
+Price = pd.read_csv("../../input/price.csv", converters={"price":
+    float})["price"].tolist() # Electriciy prices in TOU Tariff per MegaWattHours in Euros (€)
 MCharge = 500000 # Maximum Battery stored energy in MegaWattHours (MWh)
 ICharge = MCharge/2 # Initial Battery stored energy in MegaWattHours (MWh)
 
@@ -27,10 +27,10 @@ def LP_Minimize_Cost(i=0):
     global ICharge
 
     # Read Iterable Parameters
-    Ppv = pd.read_csv("actual_pvgeneration.csv", converters={"actual_pvgeneration": float},
-        skiprows=range(1,T*i+1), nrows=T)["actual_pvgeneration"].tolist() # Daily PV generation forecast in MegaWatts (MW)
-    Pl = pd.read_csv("actual_load.csv", converters={"actual_load": float},
-        skiprows=range(1,T*i+1), nrows=T)["actual_load"].tolist() # Daily Load forecast in MegaWatts (MW)
+    Ppv = pd.read_csv("../../input/pvgeneration.csv", converters={"actual": float},
+        skiprows=range(1,26401+T*i), nrows=T)["actual"].tolist() # Daily PV generation forecast in MegaWatts (MW)
+    Pl = pd.read_csv("../../input/load.csv", converters={"actual": float},
+        skiprows=range(1,70081+T*i), nrows=T)["actual"].tolist() # Daily Load forecast in MegaWatts (MW)
     
     m = Model() # Model Object: m
 
