@@ -155,7 +155,7 @@ class LoadEstimator:
     todo: Please add docstring
     """
 
-    def __init__(self, config):
+    def __init__(self, config, experiment_dir):
         """
 
         Args:
@@ -167,6 +167,19 @@ class LoadEstimator:
         self.model = LoadLSTM(input_size=config.INPUT_SIZE, seq_length=config.SEQ_LENGTH, num_layers=config.NUM_LAYERS)
         self.criterion = nn.MSELoss()
         self.optimizer = optim.Adadelta(self.model.parameters(), lr=1.0)
+
+        self.experiment_dir = experiment_dir
+
+    def maybe_resume(self):
+        latest_ckpt_path = Checkpoint.get_latest_checkpoint(self.experiment_dir)
+        latest_ckpt = Checkpoint.load(path=latest_ckpt_path)
+
+        self.model = latest_ckpt.model
+        self.optimizer = latest_ckpt.optimizer
+        self.epoch = latest_ckpt.epoch
+        self.step = latest_ckpt.step
+        self.input = latest_ckpt.input
+        self.output = latest_ckpt.output
 
     def train(self, epoch_size=20):
         """
