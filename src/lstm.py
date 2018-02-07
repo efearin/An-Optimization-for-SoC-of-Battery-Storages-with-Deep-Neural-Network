@@ -370,7 +370,7 @@ if __name__ == "__main__":
     ax = fig.add_subplot(1, 1, 1)
     plt.show(block=False)
 
-    estimator = LoadEstimator(config=config)
+    estimator = LoadEstimator(config=config, experiment_dir=None)
     estimator.train(epoch_size=20)
 
     Checkpoint.get_latest_checkpoint('lel')
