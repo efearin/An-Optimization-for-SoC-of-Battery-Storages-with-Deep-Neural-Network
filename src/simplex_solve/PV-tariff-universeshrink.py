@@ -186,10 +186,10 @@ def get_random_point(initial_coordinate=None):
                 coordinates.append(initial_coordinate[x] + random.uniform(0, 1) * point_multiplier)
         point = validity_check(coordinates)
         if point is not None:
-            if initial_coordinate is None:
-                print('FULLY random point found after '+ str(miss_count)+ ' attempt')
-            else:
-                print('CLOSE random point found after '+ str(miss_count)+ ' attempt')
+            # if initial_coordinate is None:
+            #     print('FULLY random point found after '+ str(miss_count)+ ' attempt')
+            # else:
+            #     print('CLOSE random point found after '+ str(miss_count)+ ' attempt')
             return point
         miss_count+=1
 
@@ -238,6 +238,28 @@ def update_triangle(triangle):
     return None
 
 
+def update_point(point):
+    # TODO olmamış
+    """
+    change path if g-b-l path exists as g-l then if pv-b-l exists as pv-l
+    :param point: Point
+    :return: Point with different coordinates but cost is same
+    """
+
+    for q in range(0,len(pv_forecast_list)):
+
+        # g-b-l to g-l
+        gbl = min(point.coordinate[4*q+2],point.coordinate[4*q+3])
+        point.coordinate[4*q+2] -= gbl
+        point.coordinate[4*q+3] -= gbl
+
+        # pv-b-l to pv-l
+        pvbl = min(point.coordinate[4*q+1],point.coordinate[4*q+2])
+        point.coordinate[4*q+1] -= pvbl
+        point.coordinate[4*q+2] -= pvbl
+        point.coordinate[4*q+0] += pvbl
+
+
 """
 MAIN
 """
@@ -248,7 +270,7 @@ triangle = None
 # TODO: more particles might need
 for k in range(0, 1000):
     triangle = get_random_triangle()
-    print(triangle.best)
+    # print(triangle.best)
 
     while triangle.best.cost > cutoff_cost and triangle.area > cutoff_area:
         triangle = update_triangle(triangle)
@@ -262,11 +284,13 @@ for k in range(0, 1000):
     best_points.append(triangle.best)
 
 best_point = min(best_points, key=attrgetter('cost'))
-worst_point = max(best_points, key=attrgetter('cost'))
+update_point(best_point)
+# worst_point = max(best_points, key=attrgetter('cost'))
+# update_point(worst_point)
 
 # TODO: add graphic for representation
 
 print('BEST: ')
 print(best_point)
-print('WORST: ')
-print(worst_point)
+# print('WORST: ')
+# print(worst_point)
