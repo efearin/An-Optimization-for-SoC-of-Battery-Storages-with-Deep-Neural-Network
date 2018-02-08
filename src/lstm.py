@@ -1,7 +1,7 @@
 import torch
 from torch.autograd import Variable
 from torch import nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from torch import optim
 
 import pandas as pd
@@ -12,12 +12,29 @@ import os
 import dill  # dill extends python’s pickle module for serializing and de-serializing python objects
 import shutil  # high level os functionality
 
+from collections import defaultdict
 
-class LoadDataset(Dataset):
+
+
+
+class LoadFullDataset():
+    def __init__(self, csv_path, train_valid_ratio=0.9, seq_length=96) -> None:
+        self.dataset_values = pd.read_csv(csv_path).loc[:, 'actual'].values
+
+        dataset_len = self.dataset_values.shape[0]
+        train_len = int(dataset_len * train_valid_ratio)
+        valid_len = dataset_len - train_len
+
+        train_values = self.dataset_values[:train_len]
+        valid_values = self.dataset_values[train_len:]
+        self.train_dataset = LoadDataset(train_values, seq_length=seq_length)
+        self.valid_dataset = LoadDataset(valid_values, seq_length=seq_length)
+
+
+class LoadDataset(torch.utils.data.Dataset):
     """
-        Reads and normalizes the data from given csv_file.
+
         Args:
-            csv_path:
             seq_length:
         Attributes:
             dataset:
@@ -25,22 +42,14 @@ class LoadDataset(Dataset):
             y:
     """
 
-    def __init__(self, csv_path, seq_length=96):
-        """
-
-        Args:
-            csv_path:
-            seq_length:
-        """
-        self.dataset = pd.read_csv(csv_path).loc[:, 'actual'].values
-
+    def __init__(self, dataset, seq_length):
         # normalize data. otherwise criterion cannot calculate loss
-        self.dataset = (self.dataset - self.dataset.min()) / (self.dataset.max() - self.dataset.min())
+        dataset = (dataset - dataset.min()) / (dataset.max() - dataset.min())
         # split data wrt period
         # e.g. period = 96 -> (day_size, quarter_in_day)
-        datacount = self.dataset.shape[0] // seq_length
+        datacount = dataset.shape[0] // seq_length
 
-        self.X = self.dataset[:(datacount * seq_length)]
+        self.X = dataset[:(datacount * seq_length)]
 
         def create_period_signal(freq, Fs):
             t = np.arange(Fs)
@@ -101,7 +110,6 @@ class LoadLSTM(nn.Module):
     """
 
     def __init__(self, input_size, seq_length, num_layers):
-
         super(LoadLSTM, self).__init__()
         self.input_size = input_size
         self.seq_length = seq_length
@@ -150,6 +158,106 @@ class LoadLSTM(nn.Module):
         return lstm_out, self.hidden
 
 
+class Plotter:
+    """
+    Visualizes all related info.
+    """
+
+    def __init__(self, xlim, ylim=(0, 1), block=False):
+
+        self.xlim = xlim
+        self.ylim = ylim
+        self.block = block
+
+        self.fig = plt.figure()
+        self.ax = self.fig.add_subplot(1, 1, 1)
+
+        plt.xlim(self.xlim)
+        plt.ylim(self.ylim)
+        plt.show(block=block)
+
+        self.plot_container = defaultdict(tuple)
+
+    def plot(self):
+        """
+        Plot all appended figures.
+
+        Returns:
+
+        """
+        self.ax.clear()
+
+        for (label, (plot_type, what_to_plot)) in self.plot_container.items():
+            if plot_type == 'line':
+                plt.plot(what_to_plot[-self.xlim[1]:], label=label)
+            if plot_type == 'scatter':
+                plt.scatter(x=list(range(self.xlim[1])), y=what_to_plot[-self.xlim[1]:], label=label)
+
+        plt.legend()
+        plt.pause(0.0001)
+        self.fig.canvas.draw()
+
+    def add(self, what_to_plot, plot_type, label):
+        """
+        Add what_to_plot to plot container.
+        Args:
+            what_to_plot:
+            plot_type:
+            label:
+
+        Returns:
+
+        """
+        self.plot_container[label] = (plot_type, what_to_plot)
+
+    def drop(self, label):
+        """
+        Drop label from plot container.
+        Args:
+            label:
+
+        Returns:
+
+        Raises: KeyError
+
+        """
+        self.plot_container.pop(label)
+
+
+class History:
+    """
+        Args:
+            what_to_store (list): list of labels for what to store.
+    """
+
+    def __init__(self, what_to_store):
+        self.container = defaultdict(list)
+
+        for w in what_to_store:
+            self.container[w] = []
+
+    def append(self, label, value):
+        """
+
+        Args:
+            label (str):
+            value (float):
+
+        Returns:
+
+        """
+        self.container[label].append(value)
+
+    def get(self, label):
+        """
+
+        Args:
+            label:
+
+        Returns:
+        Raises: KeyError
+        """
+        return self.container[label]
 
 
 class LoadEstimator:
@@ -168,99 +276,145 @@ class LoadEstimator:
         if config.RANDOM_SEED is not None:
             torch.manual_seed(config.RANDOM_SEED)
             np.random.seed(config.RANDOM_SEED)
-        self.dataset = LoadDataset(csv_path=config.INPUT_PATH, seq_length=config.SEQ_LENGTH)
-        self.dataloader = DataLoader(self.dataset, batch_size=config.BATCH_SIZE)
-        self.model = LoadLSTM(input_size=config.INPUT_SIZE, seq_length=config.SEQ_LENGTH, num_layers=config.NUM_LAYERS)
+
+        dataset = LoadFullDataset(csv_path=config.INPUT_PATH,
+                                  train_valid_ratio=config.TRAIN_VALID_RATIO,
+                                  seq_length=config.SEQ_LENGTH)
+
+        self.train_dataset = dataset.train_dataset
+        self.valid_dataset = dataset.valid_dataset
+
+        self.train_dataloader = DataLoader(self.train_dataset, batch_size=config.BATCH_SIZE)
+        self.valid_dataloader = DataLoader(self.valid_dataset, batch_size=config.BATCH_SIZE)
+
+        self.model = LoadLSTM(input_size=config.INPUT_SIZE,
+                                    seq_length=config.SEQ_LENGTH,
+                                    num_layers=config.NUM_LAYERS)
+
         self.criterion = nn.MSELoss()
         self.optimizer = optim.Adadelta(self.model.parameters(), lr=1.0)
+        self.history = History(what_to_store=['train_loss', 'val_loss', 'test_loss'])
+        self.plotter = Plotter(xlim=(0, config.SEQ_LENGTH), ylim=(0, 1), block=False)
+
         self.experiment_dir = config.EXPERIMENT_DIR
         self.epoch = 0
-        self.step=0
-        self.input=0
-        self.output=0
-
-        self.loss_history = []
 
         if resume:
-            self.maybe_resume()
+            self.load_from_latest_ckpt()
 
+    def load_from_latest_ckpt(self):
+        """
 
+        Returns:
 
-    def maybe_resume(self):
+        """
         latest_ckpt_path = Checkpoint.get_latest_checkpoint(self.experiment_dir)
 
         print("model reading from {} ...".format(latest_ckpt_path))
 
         latest_ckpt = Checkpoint.load(path=latest_ckpt_path)
 
-
         self.model = latest_ckpt.model
         self.optimizer = latest_ckpt.optimizer
-        self.epoch = latest_ckpt.epoch + 1
-        self.step = latest_ckpt.step
-        self.input = latest_ckpt.input
-        self.output = latest_ckpt.output
-        self.loss_history = latest_ckpt.loss_history
+        self.epoch = latest_ckpt.epoch + 1  # increment by 1 to train next epoch
+        self.history = latest_ckpt.history
 
-    def train(self, epoch_size=20):
+    def _train_on_batch(self, X_batch, y_batch):
         """
 
         Args:
-            epoch_size:
+            X_batch:
+            y_batch:
+
+        Returns:
+
+        """
+
+        self.optimizer.zero_grad()  # pytorch accumulates gradients.
+        self.model.hidden = self.model.init_hidden()  # detach history of initial hidden
+        lstm_out, hidden = self.model(X_batch)
+
+        prediction = hidden[0][-1, :, :]
+        loss = self.criterion(prediction, y_batch)
+
+        loss.backward()
+        self.optimizer.step()
+
+        return lstm_out, hidden, prediction, loss
+
+    def _train_on_epoch(self, epoch):
+        """
+
+        Args:
+            epoch:
+
+        Returns:
+
+        """
+        self.model.train(mode=True)
+        for batch_num, (X, y) in enumerate(self.train_dataloader):
+            batch_size = X.size()[1]
+            step = batch_size * batch_num
+
+            (X, y) = Variable(X.float(), requires_grad=False), Variable(y.float(), requires_grad=False)
+            (lstm_out, hidden, prediction, train_loss) = self._train_on_batch(X_batch=X, y_batch=y)
+
+            self.history.append(label='train_loss', value=train_loss.data.numpy()[0])
+
+            print("epoch : {} || loss : {}".format(epoch, train_loss.data.numpy()))
+
+            X_to_plot = X.data.numpy()[:, :, 0].flatten()
+            prediction_to_plot = prediction.data.numpy().flatten()
+            self.plotter.add(what_to_plot=X_to_plot, plot_type='line', label='true')
+            self.plotter.add(what_to_plot=prediction_to_plot, plot_type='line', label='pred')
+            self.plotter.add(what_to_plot=self.history.get('train_loss'), plot_type='line', label='train_loss')
+            self.plotter.add(what_to_plot=self.history.get('valid_loss'), plot_type='line', label='valid_loss')
+            self.plotter.plot()
+
+        # save model, optimizer, epoch, history to the experiment_dir/datetime_epoch
+        Checkpoint(model=self.model, optimizer=self.optimizer,
+                   epoch=self.epoch, history=self.history,
+                   experiment_dir=self.experiment_dir).save()
+
+    def _validate(self):
+        # TODO: Implement self._validate and append loss to the history container
+        self.model.eval()
+        for batch_num, (X, y) in enumerate(self.valid_dataloader):
+
+            lstm_out, hidden = self.model(X)
+
+            prediction = hidden[0][-1, :, :]
+            valid_loss = self.criterion(prediction, y)
+
+            self.history.append(label='validation_loss', value=valid_loss.data.numpy()[0])
+
+
+    def _test(self, X, y):
+        # TODO: Implement self._test and append loss to the history container
+        # self.history.append(label='test_loss', value=test_loss.data.numpy()[0])
+        pass
+
+    def train(self, epoch_size=20):
+        """
+        Iterates from latest epoch to epoch_size because maybe model is resuming from latest checkpoint.
+        Updates self.epoch every time too to be ready for next saving process.
+        Args:
+            epoch_size: how many epoch do we want to train the model?
 
         Returns:
 
         """
         for self.epoch in range(self.epoch, epoch_size):
-            for i, (X_batch, y_batch) in enumerate(self.dataloader):
-                (X_batch, y_batch) = Variable(X_batch.float()), Variable(y_batch.float())
-
-                self.optimizer.zero_grad()  # pytorch accumulates gradients.
-                self.model.hidden = self.model.init_hidden()  # detach history of initial hidden
-                lstm_out, hidden = self.model(X_batch)  # TODO: continue from here...
-
-                pred = hidden[0][-1, :, :]
-                loss = self.criterion(pred, y_batch)
-
-                loss.backward()
-                self.optimizer.step()
-
-                self.loss_history.append(loss.data.numpy()[0])
-                self.plot(self.epoch, loss, X_batch, pred)
-
-            # save epoch, step, optimizer, model, input, output
-            Checkpoint(model=self.model, optimizer=self.optimizer,
-                       epoch=self.epoch, step=0, loss_history=self.loss_history, input=None,
-                       output=None, experiment_dir=self.experiment_dir).save()
-
-    def plot(self, epoch, loss, X_batch, pred):
-        """
-
-        Args:
-            epoch:
-            loss:
-            X_batch:
-            pred:
-
-        Returns:
-
-        """
-        print("epoch : {} || loss : {}".format(epoch, loss.data.numpy()))
-        ax.clear()
-        plt.plot(X_batch.data.numpy()[:, :, 0].flatten(), label='true')
-        plt.plot(pred.data.numpy().flatten(), label='pred')
-        plt.plot(self.loss_history, label='loss_history')
-        plt.legend()
-        # plt.xlim([0, self.config.SEQ_LENGTH])
-        plt.ylim([0, 1])
-        plt.pause(0.0001)
-        fig.canvas.draw()
+            self._train_on_epoch(epoch=self.epoch)
+            self._validate()
+        # self._test()
 
 
 class Config:
     """
 
     """
+
     def __init__(self):
         """
 
@@ -272,6 +426,7 @@ class Config:
         self.INPUT_PATH = '../input/sample_load.csv'
         self.EXPERIMENT_DIR = '../experiment'
         self.RANDOM_SEED = 7
+        self.TRAIN_VALID_RATIO = 0.9
 
 
 class Checkpoint:
@@ -282,42 +437,37 @@ class Checkpoint:
         optimizer (optim): stores the state of the optimizer
         epoch (int): current epoch (an epoch is a loop through the full training data)
         step (int): number of examples seen within the current epoch
-        input (np.array):
-        output (np.array):
+        # input (np.array):
+        # output (np.array):
 
     Attributes:
         CHECKPOINT_DIR_NAME (str):
         TRAINER_STATE_NAME (str):
         MODEL_NAME (str):
-        INPUT_FILE (str):
-        OUTPUT_FILE (str):
+        # INPUT_FILE (str):
+        # OUTPUT_FILE (str):
 
     """
     CHECKPOINT_DIR_NAME = 'checkpoints'
     TRAINER_STATE_NAME = 'trainer_states.pt'
     MODEL_NAME = 'model.pt'
-    INPUT_FILE = 'input.pt'
-    OUTPUT_FILE = 'output.pt'
 
-    def __init__(self, model, optimizer, epoch, step, loss_history, input, output, experiment_dir):
+    # INPUT_FILE = 'input.pt'
+    # OUTPUT_FILE = 'output.pt'
+
+    def __init__(self, model, optimizer, epoch, history, experiment_dir):
         """
 
         Args:
             model:
             optimizer:
             epoch:
-            step:
-            input:
-            output:
             path:
         """
         self.model = model
         self.optimizer = optimizer
         self.epoch = epoch
-        self.step = step
-        self.loss_history = loss_history
-        self.input = input
-        self.output = output
+        self.history = history
         self.experiment_dir = experiment_dir
 
     def save(self):
@@ -342,16 +492,15 @@ class Checkpoint:
 
         # SAVE
         torch.save({'epoch': self.epoch,
-                    'step': self.step,
                     'optimizer': self.optimizer,
-                    'loss_history': self.loss_history},
+                    'history': self.history},
                    os.path.join(subdir_path, self.TRAINER_STATE_NAME))
         torch.save(self.model, os.path.join(subdir_path, self.MODEL_NAME))
 
-        with open(os.path.join(subdir_path, self.INPUT_FILE), 'wb') as fout:
-            dill.dump(self.input, fout)
-        with open(os.path.join(subdir_path, self.OUTPUT_FILE), 'wb') as fout:
-            dill.dump(self.output, fout)
+        # with open(os.path.join(subdir_path, self.INPUT_FILE), 'wb') as fout:
+        #     dill.dump(self.input, fout)
+        # with open(os.path.join(subdir_path, self.OUTPUT_FILE), 'wb') as fout:
+        #     dill.dump(self.output, fout)
 
     @classmethod
     def load(cls, path):
@@ -367,7 +516,6 @@ class Checkpoint:
         resume_checkpoint = torch.load(os.path.join(path, cls.TRAINER_STATE_NAME))
         model = torch.load(os.path.join(path, cls.MODEL_NAME))
 
-
         with open(os.path.join(path, cls.INPUT_FILE), 'rb') as fin:
             input = dill.load(fin)
 
@@ -377,10 +525,7 @@ class Checkpoint:
         return Checkpoint(model=model,
                           optimizer=resume_checkpoint['optimizer'],
                           epoch=resume_checkpoint['epoch'],
-                          step=resume_checkpoint['step'],
-                          loss_history=resume_checkpoint['loss_history'],
-                          input=input,
-                          output=output,
+                          history=resume_checkpoint['history'],
                           experiment_dir=path)
 
     @classmethod
@@ -402,15 +547,6 @@ class Checkpoint:
 
 if __name__ == "__main__":
     config = Config()
-    fig = plt.figure()
-    ax = fig.add_subplot(1, 1, 1)
-    plt.show(block=False)
 
-
-    estimator = LoadEstimator(config=config, resume=True)
+    estimator = LoadEstimator(config=config, resume=False)
     estimator.train(epoch_size=40)
-
-
-
-
-
