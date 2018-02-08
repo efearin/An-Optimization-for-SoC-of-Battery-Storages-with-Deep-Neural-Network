@@ -150,36 +150,57 @@ class LoadLSTM(nn.Module):
         return lstm_out, self.hidden
 
 
+
+
 class LoadEstimator:
     """
     todo: Please add docstring
     """
 
-    def __init__(self, config, experiment_dir):
+    def __init__(self, config, resume=False):
         """
 
         Args:
             config:
         """
         self.config = config
-        self.dataset = LoadDataset(csv_path='../input/load.csv', seq_length=config.SEQ_LENGTH)
+        # if we seed random func, they will generate same output everytime.
+        if config.RANDOM_SEED is not None:
+            torch.manual_seed(config.RANDOM_SEED)
+            np.random.seed(config.RANDOM_SEED)
+        self.dataset = LoadDataset(csv_path=config.INPUT_PATH, seq_length=config.SEQ_LENGTH)
         self.dataloader = DataLoader(self.dataset, batch_size=config.BATCH_SIZE)
         self.model = LoadLSTM(input_size=config.INPUT_SIZE, seq_length=config.SEQ_LENGTH, num_layers=config.NUM_LAYERS)
         self.criterion = nn.MSELoss()
         self.optimizer = optim.Adadelta(self.model.parameters(), lr=1.0)
+        self.experiment_dir = config.EXPERIMENT_DIR
+        self.epoch = 0
+        self.step=0
+        self.input=0
+        self.output=0
 
-        self.experiment_dir = experiment_dir
+        self.loss_history = []
+
+        if resume:
+            self.maybe_resume()
+
+
 
     def maybe_resume(self):
         latest_ckpt_path = Checkpoint.get_latest_checkpoint(self.experiment_dir)
+
+        print("model reading from {} ...".format(latest_ckpt_path))
+
         latest_ckpt = Checkpoint.load(path=latest_ckpt_path)
+
 
         self.model = latest_ckpt.model
         self.optimizer = latest_ckpt.optimizer
-        self.epoch = latest_ckpt.epoch
+        self.epoch = latest_ckpt.epoch + 1
         self.step = latest_ckpt.step
         self.input = latest_ckpt.input
         self.output = latest_ckpt.output
+        self.loss_history = latest_ckpt.loss_history
 
     def train(self, epoch_size=20):
         """
@@ -190,7 +211,7 @@ class LoadEstimator:
         Returns:
 
         """
-        for epoch in range(epoch_size):
+        for self.epoch in range(self.epoch, epoch_size):
             for i, (X_batch, y_batch) in enumerate(self.dataloader):
                 (X_batch, y_batch) = Variable(X_batch.float()), Variable(y_batch.float())
 
@@ -204,7 +225,13 @@ class LoadEstimator:
                 loss.backward()
                 self.optimizer.step()
 
-                self.plot(epoch, loss, X_batch, pred)
+                self.loss_history.append(loss.data.numpy()[0])
+                self.plot(self.epoch, loss, X_batch, pred)
+
+            # save epoch, step, optimizer, model, input, output
+            Checkpoint(model=self.model, optimizer=self.optimizer,
+                       epoch=self.epoch, step=0, loss_history=self.loss_history, input=None,
+                       output=None, experiment_dir=self.experiment_dir).save()
 
     def plot(self, epoch, loss, X_batch, pred):
         """
@@ -220,12 +247,11 @@ class LoadEstimator:
         """
         print("epoch : {} || loss : {}".format(epoch, loss.data.numpy()))
         ax.clear()
-        plt.plot(X_batch.data.numpy()[:, :, 0].flatten().reshape(
-            self.config.SEQ_LENGTH * self.config.BATCH_SIZE), label='true')
-        plt.plot(pred.data.numpy().flatten().reshape(
-            self.config.SEQ_LENGTH * self.config.BATCH_SIZE), label='pred')
+        plt.plot(X_batch.data.numpy()[:, :, 0].flatten(), label='true')
+        plt.plot(pred.data.numpy().flatten(), label='pred')
+        plt.plot(self.loss_history, label='loss_history')
         plt.legend()
-        plt.xlim([0, self.config.SEQ_LENGTH])
+        # plt.xlim([0, self.config.SEQ_LENGTH])
         plt.ylim([0, 1])
         plt.pause(0.0001)
         fig.canvas.draw()
@@ -240,18 +266,22 @@ class Config:
 
         """
         self.SEQ_LENGTH = 96
-        self.NUM_LAYERS = 6
+        self.NUM_LAYERS = 1
         self.BATCH_SIZE = 1
         self.INPUT_SIZE = 5
+        self.INPUT_PATH = '../input/sample_load.csv'
+        self.EXPERIMENT_DIR = '../experiment'
+        self.RANDOM_SEED = 7
 
 
 class Checkpoint:
     """
     Args:
-        model (LoadLSTM):
-        optimizer (optim):
-        epoch (int):
-        step (int):
+
+        model (LoadLSTM): loadmodel
+        optimizer (optim): stores the state of the optimizer
+        epoch (int): current epoch (an epoch is a loop through the full training data)
+        step (int): number of examples seen within the current epoch
         input (np.array):
         output (np.array):
 
@@ -269,7 +299,7 @@ class Checkpoint:
     INPUT_FILE = 'input.pt'
     OUTPUT_FILE = 'output.pt'
 
-    def __init__(self, model, optimizer, epoch, step, input, output, path):
+    def __init__(self, model, optimizer, epoch, step, loss_history, input, output, experiment_dir):
         """
 
         Args:
@@ -285,11 +315,12 @@ class Checkpoint:
         self.optimizer = optimizer
         self.epoch = epoch
         self.step = step
+        self.loss_history = loss_history
         self.input = input
         self.output = output
-        self.path = path
+        self.experiment_dir = experiment_dir
 
-    def save(self, experiment_dir):
+    def save(self):
         """
 
         Args:
@@ -299,7 +330,8 @@ class Checkpoint:
 
         """
         date_time = time.strftime('%Y_%m_%d_%H_%M_%S', time.localtime())
-        subdir_path = os.path.join(experiment_dir, self.CHECKPOINT_DIR_NAME, date_time)
+        save_path = '{}_epoch_{}'.format(date_time, self.epoch)
+        subdir_path = os.path.join(self.experiment_dir, self.CHECKPOINT_DIR_NAME, save_path)
 
         if os.path.exists(subdir_path):
             # Clear dir
@@ -311,7 +343,8 @@ class Checkpoint:
         # SAVE
         torch.save({'epoch': self.epoch,
                     'step': self.step,
-                    'optimizer': self.optimizer},
+                    'optimizer': self.optimizer,
+                    'loss_history': self.loss_history},
                    os.path.join(subdir_path, self.TRAINER_STATE_NAME))
         torch.save(self.model, os.path.join(subdir_path, self.MODEL_NAME))
 
@@ -334,7 +367,7 @@ class Checkpoint:
         resume_checkpoint = torch.load(os.path.join(path, cls.TRAINER_STATE_NAME))
         model = torch.load(os.path.join(path, cls.MODEL_NAME))
 
-        model.flatten_parameters()  # make RNN parameters contiguos
+
         with open(os.path.join(path, cls.INPUT_FILE), 'rb') as fin:
             input = dill.load(fin)
 
@@ -345,13 +378,16 @@ class Checkpoint:
                           optimizer=resume_checkpoint['optimizer'],
                           epoch=resume_checkpoint['epoch'],
                           step=resume_checkpoint['step'],
+                          loss_history=resume_checkpoint['loss_history'],
                           input=input,
                           output=output,
-                          path=path)
+                          experiment_dir=path)
 
     @classmethod
     def get_latest_checkpoint(cls, experiment_path):
         """
+
+        Precondition: Assumes experiment_path exists and have at least 1 checkpoint
 
         Args:
             experiment_path:
@@ -370,7 +406,11 @@ if __name__ == "__main__":
     ax = fig.add_subplot(1, 1, 1)
     plt.show(block=False)
 
-    estimator = LoadEstimator(config=config, experiment_dir=None)
-    estimator.train(epoch_size=20)
 
-    Checkpoint.get_latest_checkpoint('lel')
+    estimator = LoadEstimator(config=config, resume=True)
+    estimator.train(epoch_size=40)
+
+
+
+
+
