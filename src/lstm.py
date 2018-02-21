@@ -12,21 +12,43 @@ import os
 import dill  # dill extends python’s pickle module for serializing and de-serializing python objects
 import shutil  # high level os functionality
 
+import gc
+
 from collections import defaultdict
 
 
 
 
 class LoadFullDataset():
-    def __init__(self, csv_path, train_valid_ratio=0.9, seq_length=96) -> None:
+    def __init__(self, csv_path, train_valid_ratio=0.9, train_len=None, seq_length=96) -> None:
         self.dataset_values = pd.read_csv(csv_path).loc[:, 'actual'].values
 
         dataset_len = self.dataset_values.shape[0]
-        train_len = int(dataset_len * train_valid_ratio)
-        valid_len = dataset_len - train_len
 
-        train_values = self.dataset_values[:train_len]
-        valid_values = self.dataset_values[train_len:]
+        # === CREATE PERIODIC SIGNALS
+        daycount = self.dataset_values.shape[0] // seq_length
+        self.dataset_values = self.dataset_values[:daycount*seq_length]  # remove uncomplete days
+
+        def create_period_signal(freq, Fs):
+            t = np.arange(Fs)
+            return np.sin(2 * np.pi * freq * t / Fs)
+
+        p_day = create_period_signal(daycount * seq_length / 96, daycount * seq_length)
+        p_week = create_period_signal(daycount * seq_length / (96 * 7), daycount * seq_length)
+        p_month = create_period_signal(daycount * seq_length / (96 * 30), daycount * seq_length)
+        p_year = create_period_signal(daycount * seq_length / (96 * 365), daycount * seq_length)
+
+        self.dataset_values = np.stack((self.dataset_values, p_day, p_week, p_month, p_year), axis=1)
+        self.dataset_values = np.reshape(self.dataset_values, (-1, seq_length, 5))
+
+        # SPLIT TRAIN & VALID
+        if train_len is None:
+            train_len = int(daycount * train_valid_ratio)
+        valid_len = daycount - train_len
+
+
+        train_values = self.dataset_values[:train_len, :, :]
+        valid_values = self.dataset_values[train_len:, :, :]
         self.train_dataset = LoadDataset(train_values, seq_length=seq_length)
         self.valid_dataset = LoadDataset(valid_values, seq_length=seq_length)
 
@@ -42,32 +64,22 @@ class LoadDataset(torch.utils.data.Dataset):
             y:
     """
 
-    def __init__(self, dataset, seq_length):
+    def __init__(self, dataset, seq_length, shuffle=True):
         # normalize data. otherwise criterion cannot calculate loss
         dataset = (dataset - dataset.min()) / (dataset.max() - dataset.min())
         # split data wrt period
         # e.g. period = 96 -> (day_size, quarter_in_day)
-        datacount = dataset.shape[0] // seq_length
 
-        self.X = dataset[:(datacount * seq_length)]
+        self.dataset = dataset
 
-        def create_period_signal(freq, Fs):
-            t = np.arange(Fs)
-            return np.sin(2 * np.pi * freq * t / Fs)
+        if shuffle:
+            np.random.shuffle(self.dataset)
 
-        p_day = create_period_signal(datacount * seq_length / 96, datacount * seq_length)
-        p_week = create_period_signal(datacount * seq_length / (96 * 7), datacount * seq_length)
-        p_month = create_period_signal(datacount * seq_length / (96 * 30), datacount * seq_length)
-        p_year = create_period_signal(datacount * seq_length / (96 * 365), datacount * seq_length)
-
-        self.X = np.stack((self.X, p_day, p_week, p_month, p_year), axis=1)
-
-        self.X = np.reshape(self.X, (-1, seq_length, 5))
         # rearrange X and targets
         # X = (d1,d2,d3...dn-1)
         # y = (d2,d3,d4...dn)
-        self.y = self.X[1:, :, 0]
-        self.X = self.X[:-1, :, :]
+        self.y = self.dataset[1:, :, 0]
+        self.X = self.dataset[:-1, :, :]
 
     def __len__(self):
         """
@@ -109,11 +121,12 @@ class LoadLSTM(nn.Module):
             hidden:
     """
 
-    def __init__(self, input_size, seq_length, num_layers):
+    def __init__(self, input_size, seq_length, num_layers, batch_size):
         super(LoadLSTM, self).__init__()
         self.input_size = input_size
         self.seq_length = seq_length
         self.num_layers = num_layers
+        self.batch_size = batch_size
 
         # Inputs: input, (h_0,c_0)
         #   input(seq_len, batch, input_size)
@@ -246,6 +259,9 @@ class History:
         Returns:
 
         """
+        if label not in self.container.keys():
+            raise Exception('key:{} not available in history'.format(label))
+
         self.container[label].append(value)
 
     def get(self, label):
@@ -259,11 +275,28 @@ class History:
         """
         return self.container[label]
 
+    def last(self, label):
+        """
+
+        Args:
+            label:
+
+        Returns:
+        Raises: KeyError
+        """
+        arr = self.container[label]
+        if len(arr) == 0:
+            return np.inf
+
+        return arr[-1]
+
 
 class LoadEstimator:
     """
     todo: Please add docstring
     """
+
+    # TODO: save experiment settings
 
     def __init__(self, config, resume=False):
         """
@@ -279,21 +312,23 @@ class LoadEstimator:
 
         dataset = LoadFullDataset(csv_path=config.INPUT_PATH,
                                   train_valid_ratio=config.TRAIN_VALID_RATIO,
+                                  train_len=config.TRAIN_LEN,
                                   seq_length=config.SEQ_LENGTH)
 
         self.train_dataset = dataset.train_dataset
         self.valid_dataset = dataset.valid_dataset
 
-        self.train_dataloader = DataLoader(self.train_dataset, batch_size=config.BATCH_SIZE)
-        self.valid_dataloader = DataLoader(self.valid_dataset, batch_size=config.BATCH_SIZE)
+        self.train_dataloader = DataLoader(self.train_dataset, batch_size=config.BATCH_SIZE, drop_last=True)
+        self.valid_dataloader = DataLoader(self.valid_dataset, batch_size=config.BATCH_SIZE, drop_last=True)
 
         self.model = LoadLSTM(input_size=config.INPUT_SIZE,
                                     seq_length=config.SEQ_LENGTH,
-                                    num_layers=config.NUM_LAYERS)
+                                    num_layers=config.NUM_LAYERS,
+                              batch_size=config.BATCH_SIZE)
 
         self.criterion = nn.MSELoss()
         self.optimizer = optim.Adadelta(self.model.parameters(), lr=1.0)
-        self.history = History(what_to_store=['train_loss', 'val_loss', 'test_loss'])
+        self.history = History(what_to_store=['train_loss', 'valid_loss', 'test_loss'])
         self.plotter = Plotter(xlim=(0, config.SEQ_LENGTH), ylim=(0, 1), block=False)
 
         self.experiment_dir = config.EXPERIMENT_DIR
@@ -331,6 +366,7 @@ class LoadEstimator:
         """
 
         self.optimizer.zero_grad()  # pytorch accumulates gradients.
+        gc.collect()
         self.model.hidden = self.model.init_hidden()  # detach history of initial hidden
         lstm_out, hidden = self.model(X_batch)
 
@@ -352,6 +388,7 @@ class LoadEstimator:
 
         """
         self.model.train(mode=True)
+
         for batch_num, (X, y) in enumerate(self.train_dataloader):
             batch_size = X.size()[1]
             step = batch_size * batch_num
@@ -359,17 +396,19 @@ class LoadEstimator:
             (X, y) = Variable(X.float(), requires_grad=False), Variable(y.float(), requires_grad=False)
             (lstm_out, hidden, prediction, train_loss) = self._train_on_batch(X_batch=X, y_batch=y)
 
-            self.history.append(label='train_loss', value=train_loss.data.numpy()[0])
+            self.history.append(label='train_loss', value=train_loss.data.numpy()[0].item())
 
-            print("epoch : {} || loss : {}".format(epoch, train_loss.data.numpy()))
+            print("epoch : {:>8} || batch_num : {:>8} || train_loss : {:.5f} || valid_loss  {:.5f}".format(
+                epoch, batch_num, self.history.last('train_loss'), self.history.last('valid_loss')))
 
-            X_to_plot = X.data.numpy()[:, :, 0].flatten()
-            prediction_to_plot = prediction.data.numpy().flatten()
-            self.plotter.add(what_to_plot=X_to_plot, plot_type='line', label='true')
-            self.plotter.add(what_to_plot=prediction_to_plot, plot_type='line', label='pred')
-            self.plotter.add(what_to_plot=self.history.get('train_loss'), plot_type='line', label='train_loss')
-            self.plotter.add(what_to_plot=self.history.get('valid_loss'), plot_type='line', label='valid_loss')
-            self.plotter.plot()
+            if (batch_num + 1) % 10 == 0:
+                X_to_plot = X.data.numpy()[:, :, 0].flatten()
+                prediction_to_plot = prediction.data.numpy().flatten()
+                self.plotter.add(what_to_plot=X_to_plot, plot_type='line', label='true')
+                self.plotter.add(what_to_plot=prediction_to_plot, plot_type='line', label='pred')
+                self.plotter.add(what_to_plot=self.history.get('train_loss'), plot_type='line', label='train_loss')
+                self.plotter.add(what_to_plot=self.history.get('valid_loss'), plot_type='line', label='valid_loss')
+                self.plotter.plot()
 
         # save model, optimizer, epoch, history to the experiment_dir/datetime_epoch
         Checkpoint(model=self.model, optimizer=self.optimizer,
@@ -379,14 +418,19 @@ class LoadEstimator:
     def _validate(self):
         # TODO: Implement self._validate and append loss to the history container
         self.model.eval()
+        valid_losses = []
         for batch_num, (X, y) in enumerate(self.valid_dataloader):
 
-            lstm_out, hidden = self.model(X)
+            (X, y) = Variable(X.float(), requires_grad=False), Variable(y.float(), requires_grad=False)
+            self.model.hidden = self.model.init_hidden()
+            lstm_out, hidden  = self.model(X)
 
-            prediction = hidden[0][-1, :, :]
+            prediction = Variable(hidden[0][-1, :, :].data, requires_grad=False)
             valid_loss = self.criterion(prediction, y)
 
-            self.history.append(label='validation_loss', value=valid_loss.data.numpy()[0])
+            valid_losses.append(valid_loss.data.numpy()[0].item())
+
+        self.history.append(label='valid_loss', value=sum(valid_losses)/len(valid_losses))
 
 
     def _test(self, X, y):
@@ -421,12 +465,15 @@ class Config:
         """
         self.SEQ_LENGTH = 96
         self.NUM_LAYERS = 1
-        self.BATCH_SIZE = 1
+        self.BATCH_SIZE = 20
         self.INPUT_SIZE = 5
-        self.INPUT_PATH = '../input/sample_load.csv'
-        self.EXPERIMENT_DIR = '../experiment'
+        self.INPUT_PATH = '../input/load.csv'
+        self.EXPERIMENT_DIR = '../experiments/experiment_real'
         self.RANDOM_SEED = 7
-        self.TRAIN_VALID_RATIO = 0.9
+        self.TRAIN_VALID_RATIO = 0.95
+        self.TRAIN_LEN = 2600  # 2600 days * 96 quarter out of 2922 days
+
+        self.RESUME = False
 
 
 class Checkpoint:
@@ -545,8 +592,8 @@ class Checkpoint:
         return os.path.join(checkpoints_path, all_times[0])
 
 
-if __name__ == "__main__":
-    config = Config()
 
-    estimator = LoadEstimator(config=config, resume=False)
-    estimator.train(epoch_size=40)
+config = Config()
+
+estimator = LoadEstimator(config=config, resume=config.RESUME)
+estimator.train(epoch_size=40)
