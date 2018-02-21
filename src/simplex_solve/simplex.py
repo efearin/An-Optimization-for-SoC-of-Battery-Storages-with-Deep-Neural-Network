@@ -1,43 +1,6 @@
 import random
 from operator import attrgetter
 
-# dimention 4*len(pv_forecast_list) <1pvl, 1pvb, 1bl, 1gb,
-#                                    2pvl, 2pvb, 2bl, 2gb,
-#                                    3pvl, 3pvb, 3bl, 3gb,
-#                                    4pvl, 4pvb, 4bl, 4gb>
-# pvl: photovoltaic to load (>0) | pvb: photovoltaic to battery (>0)| bl: battery to load (>0) | gb: grid to battery (might be + or -)
-# all converters stick to DC sides
-# so dimensions: pvl: after converter | pvb: no converter on line | bl: after converter
-#              | gb: on the grid side value and converter located to battery side (converter position change depending on power flow)
-#              | pvc: after converter | gl: no converter on line
-# All energy !!
-
-# TODO üçgenlerin belli bir boyutu geçmesini engelleyebiliriz 2 katına çıka çıka gitmesin bi yerden sonra sabit kalsın watt cşnsşnden bir değer belki ayarlanabilir
-# TODO universe multiplierda point için olanı evrenin bilmemkaçta biri olarak belirliyoruz belki onu da watt cinsinden düşünebiliriz
-# TODO all SoC updates could be reform in similar notations
-
-# cost calculation is in validity check
-
-load_forecast_list = [10, 10, 10]  # W
-pv_forecast_list = [10, 10, 10]  # W
-battery_capacity = 1  # Ah
-battery_voltage = 12  # V
-SoC = 1 # [0,1]
-optimal_SoC = 0.4 # [0,1]
-SoC_mismatch_penalty = 0 # punishment calculated manually using battery specs TODO must be revalued accordig to energies (multiply with energy to make it comperable with other terms) (100k upper)
-price = [2,2,2] # grid usage price per watt (TODO convert it per energy)
-back_sell_price_multiplier = 0.9 # multiplier of the price when power flows from system to grid
-                                 # (back_sell_price_multiplier * price per energy will be earned as cost function decreaser)
-converter_efficiency = 0.9
-t = 0.25  # h TODO: might be turn into list
-cutoff_cost = 0.00001 # where will it stop to search according to cost
-cutoff_area = 1 # where will it stop according to search triangle area
-
-t = t * 3600  # hour to second
-load_forecast_list = [i*t for i in load_forecast_list] # to energy
-pv_forecast_list = [i*t for i in pv_forecast_list] # to energy
-battery_capacity = battery_capacity * battery_voltage * 3600  # to energy
-inverse_converter_efficiency = 1/converter_efficiency
 
 
 class Point:
@@ -120,6 +83,23 @@ class Triangle:
 
         return max(a, b, c)
 
+# dimention 4*len(pv_forecast_list) <1pvl, 1pvb, 1bl, 1gb,
+#                                    2pvl, 2pvb, 2bl, 2gb,
+#                                    3pvl, 3pvb, 3bl, 3gb,
+#                                    4pvl, 4pvb, 4bl, 4gb>
+# pvl: photovoltaic to load (>0) | pvb: photovoltaic to battery (>0)| bl: battery to load (>0) | gb: grid to battery (might be + or -)
+# all converters stick to DC sides
+# so dimensions: pvl: after converter | pvb: no converter on line | bl: after converter
+#              | gb: on the grid side value and converter located to battery side (converter position change depending on power flow)
+#              | pvc: after converter | gl: no converter on line
+# All energy !!
+
+# TODO üçgenlerin belli bir boyutu geçmesini engelleyebiliriz 2 katına çıka çıka gitmesin bi yerden sonra sabit kalsın watt cşnsşnden bir değer belki ayarlanabilir
+# TODO universe multiplierda point için olanı evrenin bilmemkaçta biri olarak belirliyoruz belki onu da watt cinsinden düşünebiliriz
+# TODO all SoC updates could be reform in similar notations
+
+# cost calculation is in validity check
+
 def validity_check(coordinate: list):
     """
     :param coordinate: length of 4*load_forecast
@@ -157,7 +137,6 @@ def validity_check(coordinate: list):
             cost += (price[l] * (gl_list[-1] - (pvc_list[-1] + abs(coordinate[4*l+3])) * back_sell_price_multiplier) + abs(0.4 - SoC_list[-1]) * SoC_mismatch_penalty)
 
     return Point(coordinate, cost)
-
 
 def get_universe_multipliers(point_coordinate):
     coordinate = list(point_coordinate)
@@ -204,7 +183,6 @@ def get_universe_multipliers(point_coordinate):
 
     return [0,dimention_end], dimention_end / dimention_to_point_multiplier
 
-
 def get_random_point(initial_coordinate=None):
     """
     :param initial_coordinate: length of 4*load_forecast or None
@@ -246,7 +224,6 @@ def get_random_point(initial_coordinate=None):
             return point
         miss_count+=1
 
-
 def get_random_triangle():
 
     points = []
@@ -258,7 +235,6 @@ def get_random_triangle():
         if last_point.coordinate != points[1].coordinate:
             points.append(last_point)
             return Triangle(points[0], points[1], points[2])
-
 
 def update_triangle(triangle):
     """
@@ -290,7 +266,6 @@ def update_triangle(triangle):
     # triangel stucked
     return None
 
-
 # def update_point(point):
 #     # TODO move it to point class
 #     """
@@ -304,98 +279,111 @@ def update_triangle(triangle):
 #         pvc = (pv_forecast_list[q] - (point.coordinate[4*q]*inverse_converter_efficiency + point.coordinate[4*q+1])) * converter_efficiency
 #         gl = load_forecast_list[q] - (point.coordinate[4 * q + 2] + point.coordinate[4 * q])
 #
-#         #pv-g-l to pv-l
-#         pvcl = min(pvc,gl)
-#         pvc -= pvcl
-#         gl -= pvcl
-#         point.coordinate[4*q] += pvcl
-#
-#
-#
-#
+#         # pv-g-l
+#         pvgl = min(pvc, gl)
+#         pvc -= pvgl
+#         gl -= pvgl
+#         point.coordinate[4*q] += pvgl
 #
 #         if point.coordinate[4*q+3]>=0:
-#
-#             pvgb= min (pvc,point.coordinate[4*q+3])
-#             pvc -= pvgb
-#             point.coordinate[4*q+3] -= pvgb
-#             point.coordinate[1]+=pvgb*inverse_converter_efficiency
-#
-#             # power flows grid to battery on gb path (means gb>0)
-#             # g-b-l to g-l
-#             gbl = min(point.coordinate[4*q+2],point.coordinate[4*q+3])
-#             point.coordinate[4*q+2] -= gbl
-#             point.coordinate[4*q+3] -= gbl
-#             gl +=
+#             pvgbl = min()
 #
 #         else:
-#             #b-g-l to b-l
-#             bgl = min(abs(point.coordinate[4*q+3]),gl)
-#             gl -= bgl
-#             point.coordinate[4*q+3] += bgl
-#             point.coordinate[4*q+2] += bgl
-#
-#             # power flows battery to grid on gb path (means gb<0)
-#             # pv-b-g to pv-c
-#             pvbg = min(point.coordinate[4*q+1],abs(point.coordinate[4*q+3]))
-#             point.coordinate[4*q+1]-=pvbg
-#             point.coordinate[4*q+3]+=pvbg
-#             pvc += pvbg
-#
-#             # pv-b-g-l to pv-l
-#
-#
-#         # pv-b-l to pv-l
-#         pvbl = min(point.coordinate[4*q+1],point.coordinate[4*q+2])
-#         point.coordinate[4*q+1] -= pvbl
-#         point.coordinate[4*q+2] -= pvbl
-#         point.coordinate[4*q+0] += pvbl
 #
 #
 #
 #     return validity_check(point.coordinate)
 
+def get_constants():
+    global battery_capacity, optimal_SoC, SoC_mismatch_penalty, back_sell_price_multiplier, converter_efficiency, t, \
+        battery_capacity, inverse_converter_efficiency, cutoff_cost, cutoff_area
+    battery_capacity = 1  # Ah
+    battery_voltage = 12  # V
+    battery_capacity = battery_capacity * battery_voltage * 3600  # to energy
 
+    optimal_SoC = 0.4  # [0,1]
+    SoC_mismatch_penalty = 0  # punishment calculated manually using battery specs TODO must be revalued accordig to energies (multiply with energy to make it comperable with other terms) (100k upper)
+    back_sell_price_multiplier = 0.9  # multiplier of the price when power flows from system to grid
+    # (back_sell_price_multiplier * price per energy will be earned as cost function decreaser)
+
+    converter_efficiency = 0.9
+    inverse_converter_efficiency = 1 / converter_efficiency
+    t = 0.25  # h TODO: might be turn into list
+    t = t * 3600  # hour to second
+
+    cutoff_cost = 0.00001  # where will it stop to search according to cost
+    cutoff_area = 1  # where will it stop according to search triangle area
+
+
+
+    #
+    # battery_capacity=classes_and_constants.battery_capacity
+    # optimal_SoC=classes_and_constants.optimal_SoC
+    # SoC_mismatch_penalty=classes_and_constants.SoC_mismatch_penalty
+    # back_sell_price_multiplier=classes_and_constants.back_sell_price_multiplier
+    # converter_efficiency=classes_and_constants.converter_efficiency
+    # t=classes_and_constants.t
+    # battery_capacity=classes_and_constants.battery_capacity
+    # inverse_converter_efficiency=classes_and_constants.inverse_converter_efficiency
+    # cutoff_cost=classes_and_constants.cutoff_cost
+    # cutoff_area=classes_and_constants.cutoff_area
 
 """
 MAIN
 """
-best_points = []
+def main(_load_forecast_list, _pv_forecast_list, _price,_SoC):
 
-triangle = None
+    get_constants()
 
-print('HAS TO BE: ')
-print(validity_check([10*3600*0.25*converter_efficiency,0,0,-SoC*battery_capacity/3*converter_efficiency,
-                      10 * 3600 * 0.25*converter_efficiency, 0, 0, -SoC * battery_capacity / 3*converter_efficiency,
-                      10 * 3600 * 0.25*converter_efficiency, 0, 0, -SoC * battery_capacity / 3*converter_efficiency]))
+    global load_forecast_list, pv_forecast_list,SoC, price
 
-# TODO: more particles might need
-for k in range(0, pow(10, len(pv_forecast_list))):
-# for k in range(0, pow(10, 3)):
-    triangle = get_random_triangle()
+    load_forecast_list =  _load_forecast_list # W
+    pv_forecast_list =  _pv_forecast_list # W
 
-    while triangle.best.cost > cutoff_cost and triangle.area > cutoff_area:
-        triangle = update_triangle(triangle)
-        if triangle is None:
-            print('triangle is stucked.')
-            print(triangle.best)
-            print(triangle.mid)
-            print(triangle.worst)
-            break
+    SoC = _SoC # [0,1]
+    price =  _price# grid usage price per watt (TODO convert it per energy)
 
-    best_points.append(triangle.best)
+    load_forecast_list = [i*t for i in load_forecast_list] # to energy
+    pv_forecast_list = [i*t for i in pv_forecast_list] # to energy
 
-best_point = min(best_points, key=attrgetter('cost'))
-#print('BEST (before point update): ')
-#print(best_point)
-# TODO update problemli best_point = update_point(best_point)
-# worst_point = max(best_points, key=attrgetter('cost'))
-# update_point(worst_point)
+    best_points = []
 
-# TODO: add graphic for representation
+    triangle = None
 
-print('BEST (after point update): ')
-print(best_point)
+    print('HAS TO BE: ')
+    print(validity_check([10*3600*0.25*converter_efficiency,0,0,-SoC*battery_capacity/3*converter_efficiency,
+                          10 * 3600 * 0.25*converter_efficiency, 0, 0, -SoC * battery_capacity / 3*converter_efficiency,
+                          10 * 3600 * 0.25*converter_efficiency, 0, 0, -SoC * battery_capacity / 3*converter_efficiency]))
 
-# print('WORST: ')
-# print(worst_point)
+    # TODO: more particles might need
+    for k in range(0, pow(10, len(pv_forecast_list))):
+    # for k in range(0, pow(10, 3)):
+        triangle = get_random_triangle()
+
+        while triangle.best.cost > cutoff_cost and triangle.area > cutoff_area:
+            triangle = update_triangle(triangle)
+            if triangle is None:
+                print('triangle is stucked.')
+                print(triangle.best)
+                print(triangle.mid)
+                print(triangle.worst)
+                break
+
+        best_points.append(triangle.best)
+
+    best_point = min(best_points, key=attrgetter('cost'))
+    #print('BEST (before point update): ')
+    #print(best_point)
+    # TODO update problemli best_point = update_point(best_point)
+    # worst_point = max(best_points, key=attrgetter('cost'))
+    # update_point(worst_point)
+
+    # TODO: add graphic for representation
+
+    print('\nBEST (simplex): ')
+    print(best_point)
+
+    return best_point
+
+if __name__ == '__main__':
+    main([10, 10, 10], [10, 10, 10], [2,2,2], 1)
