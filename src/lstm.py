@@ -57,6 +57,8 @@ class LoadFullDataset():
         p_year = create_period_signal(daycount * seq_length / (96 * 365), daycount * seq_length)
 
         self.dataset_values = np.stack((self.dataset_values, p_day, p_week, p_month, p_year), axis=1)
+
+        # TODO: fix reshape to estimate quarters. seq_length should be added in forwward pass
         self.dataset_values = np.reshape(self.dataset_values, (-1, seq_length, 5))
 
         # SPLIT TRAIN & VALID
