@@ -467,8 +467,8 @@ class Config:
         self.NUM_LAYERS = 1
         self.BATCH_SIZE = 20
         self.INPUT_SIZE = 5
-        self.INPUT_PATH = '../input/load.csv'
-        self.EXPERIMENT_DIR = '../experiments/experiment_real'
+        self.INPUT_PATH = '../input/load_wo_feb29.csv'
+        self.EXPERIMENT_DIR = '../experiments/experiment_real_1layer_wo_feb29'
         self.RANDOM_SEED = 7
         self.TRAIN_VALID_RATIO = 0.95
         self.TRAIN_LEN = 2600  # 2600 days * 96 quarter out of 2922 days
