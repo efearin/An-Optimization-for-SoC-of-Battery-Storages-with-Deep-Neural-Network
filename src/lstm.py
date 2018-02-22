@@ -23,6 +23,24 @@ class LoadFullDataset():
     def __init__(self, csv_path, train_valid_ratio=0.9, train_len=None, seq_length=96) -> None:
         self.dataset_values = pd.read_csv(csv_path).loc[:, 'actual'].values
 
+		# 1 Jan	Mon	New Year's Day	National
+		# 30 Mar	Fri	Good Friday	National
+		# 2 Apr	Mon	Easter Monday	National
+		# 1 May	Tue	Labour Day	National
+		# 10 May	Thu	Ascension Day	National
+		# 21 May	Mon	Whit Monday	National
+		# 3 Oct	Wed	Day of German Unity	National
+		# 25 Dec	Tue	Christmas Day	National
+		# 26 Dec	Wed	2nd Day of Christmas	National
+		# 
+		# 6 Jan	Sat	Epiphany		BW, BY & ST
+		# 1 Apr	Sun	Easter Sunday	BB
+		# 20 May	Sun	Whit Sunday	BB
+		# 31 May	Thu	Corpus Christi	BW, BY, HE, NW, RP, SL,SN & TH
+		# 15 Aug	Wed	Assumption Day	BY & SL
+		# 31 Oct	Wed	Reformation Day	BB, MV, SN, ST & TH
+		# 1 Nov	Thu	All Saints' Day	BW, BY, NW, RP & SL
+		# 21 Nov	Wed	Repentance Day	SN
         dataset_len = self.dataset_values.shape[0]
 
         # === CREATE PERIODIC SIGNALS
