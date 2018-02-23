@@ -20,7 +20,7 @@ from collections import defaultdict
 
 
 class LoadFullDataset():
-    def __init__(self, csv_path, train_valid_ratio=0.9, train_len=None, seq_length=96) -> None:
+    def __init__(self, csv_path, train_valid_ratio=0.9, train_day=None, seq_length=96) -> None:
         self.dataset_values = pd.read_csv(csv_path).loc[:, 'actual'].values
 
 		# 1 Jan	Mon	New Year's Day	National
@@ -59,16 +59,23 @@ class LoadFullDataset():
         self.dataset_values = np.stack((self.dataset_values, p_day, p_week, p_month, p_year), axis=1)
 
         # TODO: fix reshape to estimate quarters. seq_length should be added in forwward pass
-        self.dataset_values = np.reshape(self.dataset_values, (-1, seq_length, 5))
+        # self.dataset_values = np.reshape(self.dataset_values, (-1, seq_length, 5))
 
         # SPLIT TRAIN & VALID
-        if train_len is None:
-            train_len = int(daycount * train_valid_ratio)
-        valid_len = daycount - train_len
+        if train_day is None:
+            train_day = int(daycount * train_valid_ratio)
+        valid_day = daycount - train_day
+
+        train_len = train_day * seq_length
+        valid_len = valid_day * seq_length
 
 
-        train_values = self.dataset_values[:train_len, :, :]
-        valid_values = self.dataset_values[train_len:, :, :]
+        # train_values = self.dataset_values[:train_len, :, :]
+        # valid_values = self.dataset_values[train_len:, :, :]
+
+        train_values = self.dataset_values[:train_len, :]
+        valid_values = self.dataset_values[train_len:, :]
+
         self.train_dataset = LoadDataset(train_values, seq_length=seq_length)
         self.valid_dataset = LoadDataset(valid_values, seq_length=seq_length)
 
@@ -91,16 +98,21 @@ class LoadDataset(torch.utils.data.Dataset):
         # e.g. period = 96 -> (day_size, quarter_in_day)
 
         self.dataset = dataset
+        self.seq_length = seq_length
 
-        if shuffle:
-            np.random.shuffle(self.dataset)
+        # TODO: add shuffling later.
+        # if shuffle:
+        #     np.random.shuffle(self.dataset)
 
         # rearrange X and targets
         # X = (d1,d2,d3...dn-1)
         # y = (d2,d3,d4...dn)
-        self.y = self.dataset[1:, :, 0]
-        self.X = self.dataset[:-1, :, :]
 
+        # self.y = self.dataset[1:, :, 0]
+        # self.X = self.dataset[:-1, :, :]
+
+        self.y = self.dataset[1:, 0]
+        self.X = self.dataset[:-1, :]
     def __len__(self):
         """
 
@@ -108,7 +120,7 @@ class LoadDataset(torch.utils.data.Dataset):
             int: data count
 
         """
-        return self.X.shape[0]
+        return self.X.shape[0] - self.seq_length
 
     def __getitem__(self, ix):
         """
@@ -121,7 +133,8 @@ class LoadDataset(torch.utils.data.Dataset):
 
         """
         # (row, seq_len, input_size)
-        return self.X[ix, :, :], self.y[ix, :]
+        # return self.X[ix, :, :], self.y[ix, :]
+        return self.X[ix:ix+self.seq_length, :], self.y[ix+self.seq_length-1]
 
 
 class LoadLSTM(nn.Module):
@@ -219,10 +232,20 @@ class Plotter:
 
         """
         self.ax.clear()
-
+        x = np.arange(0, self.xlim[1])
         for (label, (plot_type, what_to_plot)) in self.plot_container.items():
             if plot_type == 'line':
-                plt.plot(what_to_plot[-self.xlim[1]:], label=label)
+                # TODO: need to refactor this method!! It's to strict
+                if label == 'X':
+                    plt.plot(x[:-1], what_to_plot[1:], label='X')
+                elif label == 'true':
+                    last_value_X = self.plot_container['X'][1][-1]
+                    plt.plot(x[-2:], np.stack((last_value_X, what_to_plot)), label='true')
+                elif label == 'pred':
+                    last_value_X = self.plot_container['X'][1][-1]
+                    plt.plot(x[-2:], np.stack((last_value_X, what_to_plot)), label='pred')
+                else:
+                    plt.plot(what_to_plot[-self.xlim[1]:], label=label)
             if plot_type == 'scatter':
                 plt.scatter(x=list(range(self.xlim[1])), y=what_to_plot[-self.xlim[1]:], label=label)
 
@@ -332,7 +355,7 @@ class LoadEstimator:
 
         dataset = LoadFullDataset(csv_path=config.INPUT_PATH,
                                   train_valid_ratio=config.TRAIN_VALID_RATIO,
-                                  train_len=config.TRAIN_LEN,
+                                  train_day=config.TRAIN_DAY,
                                   seq_length=config.SEQ_LENGTH)
 
         self.train_dataset = dataset.train_dataset
@@ -390,7 +413,8 @@ class LoadEstimator:
         self.model.hidden = self.model.init_hidden()  # detach history of initial hidden
         lstm_out, hidden = self.model(X_batch)
 
-        prediction = hidden[0][-1, :, :]
+        # prediction = hidden[0][-1, :, :]
+        prediction = lstm_out[-1, :, -1]
         loss = self.criterion(prediction, y_batch)
 
         loss.backward()
@@ -409,6 +433,7 @@ class LoadEstimator:
         """
         self.model.train(mode=True)
 
+
         for batch_num, (X, y) in enumerate(self.train_dataloader):
             batch_size = X.size()[1]
             step = batch_size * batch_num
@@ -418,13 +443,15 @@ class LoadEstimator:
 
             self.history.append(label='train_loss', value=train_loss.data.numpy()[0].item())
 
-            print("epoch : {:>8} || batch_num : {:>8} || train_loss : {:.5f} || valid_loss  {:.5f}".format(
-                epoch, batch_num, self.history.last('train_loss'), self.history.last('valid_loss')))
+            print("epoch : {:>8} || batch_num : ({:>4}/{:<4}) || train_loss : {:.5f} || valid_loss  {:.5f}".format(
+                epoch, batch_num, len(self.train_dataloader), self.history.last('train_loss'), self.history.last('valid_loss')))
 
-            if (batch_num + 1) % 10 == 0:
-                X_to_plot = X.data.numpy()[:, :, 0].flatten()
-                prediction_to_plot = prediction.data.numpy().flatten()
-                self.plotter.add(what_to_plot=X_to_plot, plot_type='line', label='true')
+            if True: #(batch_num + 1) % 10 == 0:
+                X_to_plot = X.data.numpy()[0, :, 0]
+                y_to_plot = y.data.numpy()[0]
+                prediction_to_plot = prediction.data.numpy()[0]
+                self.plotter.add(what_to_plot=X_to_plot, plot_type='line', label='X')
+                self.plotter.add(what_to_plot=y_to_plot, plot_type='line', label='true')
                 self.plotter.add(what_to_plot=prediction_to_plot, plot_type='line', label='pred')
                 self.plotter.add(what_to_plot=self.history.get('train_loss'), plot_type='line', label='train_loss')
                 self.plotter.add(what_to_plot=self.history.get('valid_loss'), plot_type='line', label='valid_loss')
@@ -440,12 +467,12 @@ class LoadEstimator:
         self.model.eval()
         valid_losses = []
         for batch_num, (X, y) in enumerate(self.valid_dataloader):
-
             (X, y) = Variable(X.float(), requires_grad=False), Variable(y.float(), requires_grad=False)
             self.model.hidden = self.model.init_hidden()
             lstm_out, hidden  = self.model(X)
 
-            prediction = Variable(hidden[0][-1, :, :].data, requires_grad=False)
+            # prediction = hidden[0][-1, :, :]
+            prediction = lstm_out[-1, :, -1]
             valid_loss = self.criterion(prediction, y)
 
             valid_losses.append(valid_loss.data.numpy()[0].item())
@@ -485,13 +512,13 @@ class Config:
         """
         self.SEQ_LENGTH = 96
         self.NUM_LAYERS = 1
-        self.BATCH_SIZE = 20
+        self.BATCH_SIZE = 200
         self.INPUT_SIZE = 5
         self.INPUT_PATH = '../input/load_wo_feb29.csv'
-        self.EXPERIMENT_DIR = '../experiments/experiment_real_1layer_wo_feb29'
+        self.EXPERIMENT_DIR = '../experiments/load_wo_feb29_15min'
         self.RANDOM_SEED = 7
         self.TRAIN_VALID_RATIO = 0.95
-        self.TRAIN_LEN = 2600  # 2600 days * 96 quarter out of 2922 days
+        self.TRAIN_DAY = 2700  # 2700 days * 96 quarter out of 2922 days
 
         self.RESUME = False
 
