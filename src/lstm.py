@@ -17,35 +17,34 @@ import gc
 from collections import defaultdict
 
 
-
-
 class LoadFullDataset():
     def __init__(self, csv_path, train_valid_ratio=0.9, train_day=None, seq_length=96) -> None:
         self.dataset_values = pd.read_csv(csv_path).loc[:, 'actual'].values
 
-		# 1 Jan	Mon	New Year's Day	National
-		# 30 Mar	Fri	Good Friday	National
-		# 2 Apr	Mon	Easter Monday	National
-		# 1 May	Tue	Labour Day	National
-		# 10 May	Thu	Ascension Day	National
-		# 21 May	Mon	Whit Monday	National
-		# 3 Oct	Wed	Day of German Unity	National
-		# 25 Dec	Tue	Christmas Day	National
-		# 26 Dec	Wed	2nd Day of Christmas	National
-		# 
-		# 6 Jan	Sat	Epiphany		BW, BY & ST
-		# 1 Apr	Sun	Easter Sunday	BB
-		# 20 May	Sun	Whit Sunday	BB
-		# 31 May	Thu	Corpus Christi	BW, BY, HE, NW, RP, SL,SN & TH
-		# 15 Aug	Wed	Assumption Day	BY & SL
-		# 31 Oct	Wed	Reformation Day	BB, MV, SN, ST & TH
-		# 1 Nov	Thu	All Saints' Day	BW, BY, NW, RP & SL
-		# 21 Nov	Wed	Repentance Day	SN
+        # 1 Jan	Mon	New Year's Day	National
+        # 30 Mar	Fri	Good Friday	National
+        # 2 Apr	Mon	Easter Monday	National
+        # 1 May	Tue	Labour Day	National
+        # 10 May	Thu	Ascension Day	National
+        # 21 May	Mon	Whit Monday	National
+        # 3 Oct	Wed	Day of German Unity	National
+        # 25 Dec	Tue	Christmas Day	National
+        # 26 Dec	Wed	2nd Day of Christmas	National
+        #
+        # 6 Jan	Sat	Epiphany		BW, BY & ST
+        # 1 Apr	Sun	Easter Sunday	BB
+        # 20 May	Sun	Whit Sunday	BB
+        # 31 May	Thu	Corpus Christi	BW, BY, HE, NW, RP, SL,SN & TH
+        # 15 Aug	Wed	Assumption Day	BY & SL
+        # 31 Oct	Wed	Reformation Day	BB, MV, SN, ST & TH
+        # 1 Nov	Thu	All Saints' Day	BW, BY, NW, RP & SL
+        # 21 Nov	Wed	Repentance Day	SN
+
         dataset_len = self.dataset_values.shape[0]
 
         # === CREATE PERIODIC SIGNALS
         daycount = self.dataset_values.shape[0] // seq_length
-        self.dataset_values = self.dataset_values[:daycount*seq_length]  # remove uncomplete days
+        self.dataset_values = self.dataset_values[:daycount * seq_length]  # remove uncomplete days
 
         def create_period_signal(freq, Fs):
             t = np.arange(Fs)
@@ -68,7 +67,6 @@ class LoadFullDataset():
 
         train_len = train_day * seq_length
         valid_len = valid_day * seq_length
-
 
         # train_values = self.dataset_values[:train_len, :, :]
         # valid_values = self.dataset_values[train_len:, :, :]
@@ -93,11 +91,11 @@ class LoadDataset(torch.utils.data.Dataset):
 
     def __init__(self, dataset, seq_length, shuffle=True):
         # normalize data. otherwise criterion cannot calculate loss
-        dataset = (dataset - dataset.min()) / (dataset.max() - dataset.min())
+        self.dataset, self.min_norm_term, self.max_norm_term = self.normalize(dataset)
         # split data wrt period
         # e.g. period = 96 -> (day_size, quarter_in_day)
 
-        self.dataset = dataset
+
         self.seq_length = seq_length
 
         # TODO: add shuffling later.
@@ -113,6 +111,31 @@ class LoadDataset(torch.utils.data.Dataset):
 
         self.y = self.dataset[1:, 0]
         self.X = self.dataset[:-1, :]
+
+    def normalize(self, arr):
+        """
+
+        Args:
+            arr:
+
+        Returns:
+
+        """
+        return (arr - arr.min()) / (arr.max() - arr.min()), arr.min(), arr.max()
+
+    def inverse_normalize(self, arr, min_term, max_term):
+        """
+
+        Args:
+            arr:
+            min_term:
+            max_term:
+
+        Returns:
+
+        """
+        return arr*(max_term-min_term) + min_term
+
     def __len__(self):
         """
 
@@ -134,7 +157,7 @@ class LoadDataset(torch.utils.data.Dataset):
         """
         # (row, seq_len, input_size)
         # return self.X[ix, :, :], self.y[ix, :]
-        return self.X[ix:ix+self.seq_length, :], self.y[ix+self.seq_length-1]
+        return self.X[ix:ix + self.seq_length, :], self.y[ix + self.seq_length - 1]
 
 
 class LoadLSTM(nn.Module):
@@ -365,8 +388,8 @@ class LoadEstimator:
         self.valid_dataloader = DataLoader(self.valid_dataset, batch_size=config.BATCH_SIZE, drop_last=True)
 
         self.model = LoadLSTM(input_size=config.INPUT_SIZE,
-                                    seq_length=config.SEQ_LENGTH,
-                                    num_layers=config.NUM_LAYERS,
+                              seq_length=config.SEQ_LENGTH,
+                              num_layers=config.NUM_LAYERS,
                               batch_size=config.BATCH_SIZE)
 
         self.criterion = nn.MSELoss()
@@ -433,7 +456,6 @@ class LoadEstimator:
         """
         self.model.train(mode=True)
 
-
         for batch_num, (X, y) in enumerate(self.train_dataloader):
             batch_size = X.size()[1]
             step = batch_size * batch_num
@@ -444,9 +466,10 @@ class LoadEstimator:
             self.history.append(label='train_loss', value=train_loss.data.numpy()[0].item())
 
             print("epoch : {:>8} || batch_num : ({:>4}/{:<4}) || train_loss : {:.5f} || valid_loss  {:.5f}".format(
-                epoch, batch_num, len(self.train_dataloader), self.history.last('train_loss'), self.history.last('valid_loss')))
+                epoch, batch_num, len(self.train_dataloader), self.history.last('train_loss'),
+                self.history.last('valid_loss')))
 
-            if True: #(batch_num + 1) % 10 == 0:
+            if True:  # (batch_num + 1) % 10 == 0:
                 X_to_plot = X.data.numpy()[0, :, 0]
                 y_to_plot = y.data.numpy()[0]
                 prediction_to_plot = prediction.data.numpy()[0]
@@ -469,7 +492,7 @@ class LoadEstimator:
         for batch_num, (X, y) in enumerate(self.valid_dataloader):
             (X, y) = Variable(X.float(), requires_grad=False), Variable(y.float(), requires_grad=False)
             self.model.hidden = self.model.init_hidden()
-            lstm_out, hidden  = self.model(X)
+            lstm_out, hidden = self.model(X)
 
             # prediction = hidden[0][-1, :, :]
             prediction = lstm_out[-1, :, -1]
@@ -477,13 +500,31 @@ class LoadEstimator:
 
             valid_losses.append(valid_loss.data.numpy()[0].item())
 
-        self.history.append(label='valid_loss', value=sum(valid_losses)/len(valid_losses))
+        self.history.append(label='valid_loss', value=sum(valid_losses) / len(valid_losses))
 
-
-    def _test(self, X, y):
+    def test(self):
         # TODO: Implement self._test and append loss to the history container
+        self.model.eval()
+        valid_losses = []
+        predictions = []
+        Xs = []
+        ys = []
+        for batch_num, (X, y) in enumerate(self.valid_dataloader):
+            (X, y) = Variable(X.float(), requires_grad=False), Variable(y.float(), requires_grad=False)
+            self.model.hidden = self.model.init_hidden()
+            lstm_out, hidden = self.model(X)
+
+            # prediction = hidden[0][-1, :, :]
+            prediction = lstm_out[-1, :, -1]
+            valid_loss = self.criterion(prediction, y)
+
+            valid_losses.append(valid_loss.data.numpy()[0].item())
+
+            Xs.append(X)
+            ys.append(y)
+            predictions.append(prediction.data.numpy()[0].item())
         # self.history.append(label='test_loss', value=test_loss.data.numpy()[0])
-        pass
+        return {'Xs': Xs, 'ys': ys, 'predictions': predictions, 'valid_losses': valid_losses}
 
     def train(self, epoch_size=20):
         """
@@ -498,7 +539,7 @@ class LoadEstimator:
         for self.epoch in range(self.epoch, epoch_size):
             self._train_on_epoch(epoch=self.epoch)
             self._validate()
-        # self._test()
+            # self._test()
 
 
 class Config:
@@ -510,9 +551,10 @@ class Config:
         """
 
         """
+        self.EPOCH_SIZE = 40
         self.SEQ_LENGTH = 96
         self.NUM_LAYERS = 1
-        self.BATCH_SIZE = 200
+        self.BATCH_SIZE = 500
         self.INPUT_SIZE = 5
         self.INPUT_PATH = '../input/load_wo_feb29.csv'
         self.EXPERIMENT_DIR = '../experiments/load_wo_feb29_15min'
@@ -520,7 +562,7 @@ class Config:
         self.TRAIN_VALID_RATIO = 0.95
         self.TRAIN_DAY = 2700  # 2700 days * 96 quarter out of 2922 days
 
-        self.RESUME = False
+        self.RESUME = True
 
 
 class Checkpoint:
@@ -610,11 +652,11 @@ class Checkpoint:
         resume_checkpoint = torch.load(os.path.join(path, cls.TRAINER_STATE_NAME))
         model = torch.load(os.path.join(path, cls.MODEL_NAME))
 
-        with open(os.path.join(path, cls.INPUT_FILE), 'rb') as fin:
-            input = dill.load(fin)
-
-        with open(os.path.join(path, cls.OUTPUT_FILE), 'rb') as fin:
-            output = dill.load(fin)
+        # with open(os.path.join(path, cls.INPUT_FILE), 'rb') as fin:
+        #     input = dill.load(fin)
+        #
+        # with open(os.path.join(path, cls.OUTPUT_FILE), 'rb') as fin:
+        #     output = dill.load(fin)
 
         return Checkpoint(model=model,
                           optimizer=resume_checkpoint['optimizer'],
@@ -639,8 +681,12 @@ class Checkpoint:
         return os.path.join(checkpoints_path, all_times[0])
 
 
-
 config = Config()
 
 estimator = LoadEstimator(config=config, resume=config.RESUME)
-estimator.train(epoch_size=40)
+
+if config.RESUME:
+    res_dict = estimator.test()
+    print()
+else:
+    estimator.train(epoch_size=config.EPOCH_SIZE)
