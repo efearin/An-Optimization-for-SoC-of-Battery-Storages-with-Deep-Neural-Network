@@ -89,5 +89,5 @@ def LP_Minimize_Cost(i=0):
 ## OPTIMIZATION
 
 # Optimization Loop
-for i in range(10):
+for i in range(1):
     LP_Minimize_Cost(i)
