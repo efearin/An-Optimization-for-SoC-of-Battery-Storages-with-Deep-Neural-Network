@@ -10,16 +10,14 @@ import pandas as pd
 
 # Price = pd.read_csv("../../input/price.csv", converters={"price":
 #     float})["price"].tolist() # Electriciy prices in TOU Tariff per MegaWattHours in Euros (€)
-
-Price = [7200, 7200, 7200] # Electriciy prices in TOU Tariff per MegaWattHours in Euros (€)
-T, dT, n1, n2, SoC_opt, p_back, mis_pen = [len(Price), 0.25, 0.9, 0.9, 0.4, 0.9, 0] # Number of periods in a day, period length in hours (h),
+Price = [1, 1, 1, 1] # Electriciy prices in TOU Tariff per MegaWattHours in Euros (€)
+T, dT, n, SoC_opt, p_back, mis_pen = [len(Price), 0.25, 0.9, 0.4, 0.9, 12] # Number of periods in a day, period length in hours (h),
     # efficiencies of -/- converter and -/~ inverter as ratios (#), optimum SoC as ratio (#),
     # back sell price multiplier (#), battery SoC mismatch penalty price (€)
 Mg, Mgl, Mgb, Mpvl, Mpvb, Mpvg, Mbl, Mbg = [GRB.INFINITY, GRB.INFINITY, GRB.INFINITY, GRB.INFINITY,
     GRB.INFINITY, GRB.INFINITY, GRB.INFINITY, GRB.INFINITY] # Maximum power flow limits for all lines in MegaWatts (MW)
 MCharge = 12 # Maximum Battery stored energy in MegaWattHours (MWh)
 ICharge = MCharge # Initial Battery stored energy in MegaWattHours (MWh)
-
 
 
 ## LP MODEL
@@ -31,11 +29,11 @@ def LP_Minimize_Cost(i=0):
 
     # Read Iterable Parameters
     # Ppv = pd.read_csv("../../input/pvgeneration.csv", converters={"actual": float},
-    #     skiprows=range(1,26401+T*i), nrows=T)["actual"].tolist() # Daily PV generation forecast in MegaWatts (MW)
+    #     skiprows=range(1,26401+T*i), nrows=2*T)["actual"].tolist() # Daily PV generation forecast in MegaWatts (MW)
     # Pl = pd.read_csv("../../input/load.csv", converters={"actual": float},
-    #     skiprows=range(1,70081+T*i), nrows=T)["actual"].tolist() # Daily Load forecast in MegaWatts (MW)
-    Ppv = [10, 10, 10]
-    Pl = [10, 10, 10]
+    #     skiprows=range(1,70081+T*i), nrows=2*T)["actual"].tolist() # Daily Load forecast in MegaWatts (MW)
+    Ppv = [10, 10, 10, 10]
+    Pl = [9, 9, 9, 9]
     
     m = Model() # Model Object: m
 
@@ -63,11 +61,11 @@ def LP_Minimize_Cost(i=0):
     for t in range(T):
         m.addConstr(Ppvl[t] + Ppvb[t] + Ppvg[t] == Ppv[t]) # KCL constraints for PV
         m.addConstr(Pgl[t] + Pgb[t] == Pg[t]) # KCL constraints for Grid
-        m.addConstr(Pgl[t] + n1 * n2 * Ppvl[t] + n2 * Pbl[t] == Pl[t]) # KCL constraints for Load
+        m.addConstr(Pgl[t] + n * Ppvl[t] + n * Pbl[t] == Pl[t]) # KCL constraints for Load
         if t == 0:
-            m.addConstr(ICharge + dT * (n2 * Pgb[t] + n1 * Ppvb[t] - Pbl[t] - Pbg[t]) == Charge[t]) # The first KCL constraint for Battery
+            m.addConstr(ICharge + dT * (n * Pgb[t] + Ppvb[t] - Pbl[t] - Pbg[t]) == Charge[t]) # The first KCL constraint for Battery
         else:
-            m.addConstr(Charge[t-1] + dT * (n2 * Pgb[t] + n1 * Ppvb[t] - Pbl[t] - Pbg[t]) == Charge[t]) # Rest of the KCL constraints for Battery
+            m.addConstr(Charge[t-1] + dT * (n * Pgb[t] + Ppvb[t] - Pbl[t] - Pbg[t]) == Charge[t]) # Rest of the KCL constraints for Battery
         m.addConstr(v[t] == Pgb[t] + Pbg[t])
         m.addConstr(v[t] == max_(Pgb[t], Pbg[t])) # Only one of Grid to Battery and Battey to Grid power flows is allowed in a period constraints
         m.addConstr(u[t] == Charge[t] / MCharge - SoC_opt)
@@ -76,7 +74,7 @@ def LP_Minimize_Cost(i=0):
     # Optimize Model
     # Set Objective Function
     m.setObjective(sum(((dT * Price[t] * Pg[t]) + (Mismatch[t] * mis_pen) -
-        (dT * Price[t] * p_back * (n1 * n2 * Ppvg[t] + n2 * Pbg[t]))) for t in range(T)), GRB.MINIMIZE)
+        (dT * Price[t] * p_back * (n * Ppvg[t] + n * Pbg[t]))) for t in range(T)), GRB.MINIMIZE)
     m.update() # Update Model
     m.optimize() # Run Model Optimization
     
@@ -93,25 +91,28 @@ def LP_Minimize_Cost(i=0):
         Charge_results = m.getAttr('x', Charge)
         Mismatch_results = m.getAttr('x', Mismatch)
         
-        ICharge = Charge_results[T-1]
+        TT = T
+        ICharge = Charge_results[TT-1]
         SoC = [(round(100*Charge_results[t]/MCharge)) for t in range(T)]
-        
+        # for t in range(TT):
+        #     Cost += (dT * Price[t] * Pg_results[t]) + (Mismatch_results[t] * mis_pen) - (dT * Price[t] * p_back * (n * Ppvg_results[t] + n * Pbg_results[t]))
+        Cost = m.objVal
         print("Optimal solution is found in ", round(m.Runtime,3), " seconds.")
-        print("Total_Cost (€) = ", m.objVal)
-        # print("ICharge = ", ICharge)
-        print("SoC (%): " + " ".join(map(str, SoC)))
-        print("Pl: ", Pl)
-        print("Ppv: ", Ppv)
-        print("Pg: ", Pg_results)
-        print("Pgl: ", Pgl_results)
-        print("Pgb: ", Pgb_results)
-        print("Ppvl: ", Ppvl_results)
-        print("Ppvb: ", Ppvb_results)
-        print("Ppvg: ", Ppvg_results)
-        print("Pbl: ", Pbl_results)
-        print("Pbg: ", Pbg_results)
-        print("Charge: ", Charge_results)
-        print("Mismatch: ", Mismatch_results)
+        print("Cost (€) = ", Cost)
+        print("Pl: ", Pl[:TT])
+        print("Ppv: ", Ppv[:TT])
+        print("Pg: ", Pg_results[:TT])
+        print("Pgl: ", Pgl_results[:TT])
+        print("Pgb: ", Pgb_results[:TT])
+        print("Ppvl: ", Ppvl_results[:TT])
+        print("Ppvb: ", Ppvb_results[:TT])
+        print("Ppvg: ", Ppvg_results[:TT])
+        print("Pbl: ", Pbl_results[:TT])
+        print("Pbg: ", Pbg_results[:TT])
+        print("SoC (%): " + " ".join(map(str, SoC[:TT])))
+        print("Charge: ", Charge_results[:TT])
+        print("Mismatch: ", Mismatch_results[:TT])
+        print("ICharge = ", ICharge)
     else:
         print("There is no feasible solution!")
         ICharge = 0
@@ -123,4 +124,4 @@ def LP_Minimize_Cost(i=0):
 ## OPTIMIZATION
 
 LP_Minimize_Cost()
-input()
+# input()
