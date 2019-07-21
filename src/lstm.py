@@ -557,12 +557,12 @@ class Config:
         self.BATCH_SIZE = 500
         self.INPUT_SIZE = 5
         self.INPUT_PATH = '../input/load_wo_feb29.csv'
-        self.EXPERIMENT_DIR = '../experiments/load_wo_feb29_15min'
+        self.EXPERIMENT_DIR = '../experiment/load_wo_feb29_15min'
         self.RANDOM_SEED = 7
         self.TRAIN_VALID_RATIO = 0.95
         self.TRAIN_DAY = 2700  # 2700 days * 96 quarter out of 2922 days
 
-        self.RESUME = True
+        self.RESUME = False
 
 
 class Checkpoint:
