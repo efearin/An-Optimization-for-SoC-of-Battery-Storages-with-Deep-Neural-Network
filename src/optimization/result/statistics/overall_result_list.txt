@@ -1,0 +1,49 @@
+﻿BLIND:
+	TR(₺):	blind:		1624.3785812333424
+	DE(€):	blind:		912.7321515300126
+
+MIP:
+	TR(₺):	battery forecast:	934.1679034547012
+		battery adjusted:	1028.0090915863868
+		battery their forecast:	1029.9052113322173
+		battery their adjusted:	1024.5101319725966
+		battery optimal:	1023.8641711725409
+		pv forecast:		-157.85353380963468
+		pv adjusted:	-42.97394702927317
+		pv their forecast:	-51.191421964833665
+		pv their adjusted:	-46.53088245502117
+		pv optimal:		-50.52228856499104
+	
+	DE(€):	battery forecast:	865.2525046588797	*useless
+		battery adjusted:	912.7321515300126	*useless
+		battery their forecast:	916.5767177931791	*useless
+		battery their adjusted:	912.7321515300126	*useless
+		battery optimal:	912.7321515300126	*useless
+		pv forecast:		241.42375300824875
+		pv adjusted:	297.83173461841744
+		pv their forecast:	295.09226013457294
+		pv their adjusted:	296.67202128478823
+		pv optimal:		294.476245086938
+
+DYNAMIC:
+	TR(₺):	battery forecast:	941.8916481306326
+		battery adjusted:	1028.688253706996
+		battery their forecast:	0
+		battery their adjusted:	0
+		battery optimal:	1023.8641711725409
+		pv forecast:		-151.15722488450328
+		pv adjusted:	-43.91728594851275
+		pv their forecast:	0
+		pv their adjusted:	0
+		pv optimal:		-50.52228856499104
+	
+	DE(€):	battery forecast:	868.707981964556
+		battery adjusted:	912.7321515300126
+		battery their forecast:	0
+		battery their adjusted:	0
+		battery optimal:	912.7321515300126
+		pv forecast:		243.83557502703817
+		pv adjusted:	297.0793133101876
+		pv their forecast:	0
+		pv their adjusted:	0
+		pv optimal:		294.476245086938
